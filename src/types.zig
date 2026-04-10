@@ -1,14 +1,15 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 pub fn defaultDot(
     comptime Context: type,
     comptime Value: type,
     comptime mutable: bool,
-) fn (constify(Context, mutable), std.mem.Allocator, []const u8) error{OutOfMemory}!Value {
+) fn (constify(Context, mutable), Allocator, []const u8) error{OutOfMemory}!Value {
     return struct {
         pub fn dot(
             self: constify(Context, mutable),
-            gpa: std.mem.Allocator,
+            gpa: Allocator,
             path: []const u8,
         ) !Value {
             const info = @typeInfo(Context).@"struct";
@@ -31,7 +32,7 @@ pub fn defaultDot(
 
 pub fn defaultCall(Value: type, Context: type) fn (
     Value,
-    std.mem.Allocator,
+    Allocator,
     *const Context,
     []const u8,
     []const Value,
@@ -39,7 +40,7 @@ pub fn defaultCall(Value: type, Context: type) fn (
     return struct {
         pub fn call(
             value: Value,
-            gpa: std.mem.Allocator,
+            gpa: Allocator,
             ctx: *const Context,
             fn_name: []const u8,
             args: []const Value,

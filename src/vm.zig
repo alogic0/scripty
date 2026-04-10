@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 const builtin = @import("builtin");
 const tracy = @import("tracy");
 const types = @import("types.zig");
@@ -370,6 +371,16 @@ pub const TestValue = union(Tag) {
                     return TestValue.from(gpa, str.len);
                 }
             };
+            pub const crash = struct {
+                pub fn call(
+                    _: []const u8,
+                    _: std.mem.Allocator,
+                    _: *const TestContext,
+                    _: []const TestValue,
+                ) !TestValue {
+                    @panic("crash found!");
+                }
+            };
             pub const ext = struct {
                 pub fn call(
                     str: []const u8,
@@ -457,6 +468,7 @@ const TestInterpreter = VM(TestContext, TestValue);
 
 test "basic" {
     const code = "$page.title";
+
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
@@ -476,6 +488,7 @@ test "basic" {
 
 test "builtin" {
     const code = "$page.title.len()";
+
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
@@ -495,6 +508,7 @@ test "builtin" {
 
 test "interrupt" {
     const code = "$page.title.ext()";
+
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
@@ -504,4 +518,29 @@ test "interrupt" {
         error.Interrupt,
         vm.run(arena.allocator(), &t, code, .{}),
     );
+}
+
+test "fuzz" {
+    try std.testing.fuzz({}, testOne, .{});
+}
+
+fn testOne(context: void, smith: *std.testing.Smith) !void {
+    _ = context;
+
+    var buf: [1024]u8 = undefined;
+    const input = buf[0..smith.slice(&buf)];
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var t = test_ctx;
+    var vm: TestInterpreter = .{};
+    while (true) {
+        _ = vm.run(arena.allocator(), &t, input, .{}) catch |err| switch (err) {
+            error.OutOfMemory => return,
+            error.Interrupt => continue,
+            error.Quota => unreachable,
+        };
+        return;
+    }
 }
