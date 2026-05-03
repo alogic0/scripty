@@ -27,4 +27,4 @@ This example contains three Scripty expressions:
 
 # Usage
 
-See `examples/basic.zig`. Note that the API is not fully polished yet and it might change in the future.
+See `src/example.zig`. Note that the API is not fully polished yet and it will change in the future.
