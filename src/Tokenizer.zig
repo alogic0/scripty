@@ -169,7 +169,6 @@ pub fn next(tokenizer: *Tokenizer, src: []const u8) ?Token {
         },
         .string => string: switch (tokenizer.char(src)) {
             0 => {
-                tok.tag = .invalid;
                 tok.loc.end = tokenizer.idx;
                 break :state;
             },
@@ -332,6 +331,12 @@ test "general language" {
             .string,
             .rparen,
         } },
+        .{ .code = "$date('iso86", .expected = &.{
+            .dollar,
+            .identifier,
+            .lparen,
+            .invalid,
+        } },
     };
 
     for (cases) |case| {
@@ -357,7 +362,7 @@ test "general language" {
 test "strings" {
     const cases =
         \\"arst"
-        \\"arst"
+        \\'arst'
         \\"ba\"nana1"
         \\"ba\'nana2"
         \\'ba\'nana3'
