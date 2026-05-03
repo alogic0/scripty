@@ -1,5 +1,6 @@
 const std = @import("std");
 const Io = std.Io;
+const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const tracy = @import("tracy");
 const types = @import("types.zig");
@@ -293,13 +294,51 @@ pub fn VM(
             var it = std.mem.tokenizeScalar(u8, path, '.');
             var val = value;
             while (it.next()) |component| {
-                val = try val.dot(gpa, component);
+                val = try dot(gpa, Value, val, component);
                 if (val == .err) break;
             }
 
             return val;
         }
     };
+}
+
+fn dot(
+    gpa: Allocator,
+    ValueUnion: type,
+    value: ValueUnion,
+    component: []const u8,
+) error{OutOfMemory}!ValueUnion {
+    const not_found: ValueUnion = .{ .err = "field not found" };
+
+    switch (value) {
+        inline else => |v| {
+            const info = switch (@typeInfo(@TypeOf(v))) {
+                .@"struct" => |str| str,
+                .pointer => |ptr| switch (@typeInfo(ptr.child)) {
+                    .@"struct" => |str| str,
+                    else => return not_found,
+                },
+                else => return not_found,
+                // else => @compileError("TODO: add support for " ++ @typeName(@TypeOf(v))),
+            };
+
+            inline for (info.fields) |f| {
+                if (f.name[0] == '_') continue;
+                if (std.mem.eql(u8, f.name, component)) {
+                    const by_ref = @typeInfo(f.type) == .@"struct" and
+                        @hasDecl(f.type, "PassByRef") and f.type.PassByRef;
+                    if (by_ref) {
+                        return ValueUnion.from(gpa, &@field(v, f.name));
+                    } else {
+                        return ValueUnion.from(gpa, @field(v, f.name));
+                    }
+                }
+            }
+
+            return not_found;
+        },
+    }
 }
 
 pub const TestValue = union(Tag) {
@@ -411,18 +450,15 @@ const TestContext = struct {
         name: []const u8,
 
         pub const PassByRef = true;
-        pub const dot = types.defaultDot(Site, TestValue, false);
     };
     pub const Page = struct {
         title: []const u8,
         content: []const u8,
 
         pub const PassByRef = true;
-        pub const dot = types.defaultDot(Page, TestValue, false);
     };
 
     pub const PassByRef = true;
-    pub const dot = types.defaultDot(TestContext, TestValue, false);
 };
 
 const test_ctx: TestContext = .{

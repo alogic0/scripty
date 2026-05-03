@@ -4,9 +4,9 @@ const scripty = @import("root.zig"); // In your case this would be @import("scri
 
 /// A Scripty VM is created by providing a Context and a Value type which
 /// make up the Scripty evaluation context.
-const ExampleInterpreter = scripty.VM(ExampleContext, ExampleValue);
+const ExampleVM = scripty.VM(ExampleContext, ExampleValue);
 
-test ExampleInterpreter {
+test ExampleVM {
     var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena_state.deinit();
 
@@ -26,7 +26,7 @@ test ExampleInterpreter {
         ._force_https = true,
     };
 
-    var vm: ExampleInterpreter = .{};
+    var vm: ExampleVM = .{};
     const result = while (true) break vm.run(arena, &ctx, src, .{}) catch |err| switch (err) {
         error.OutOfMemory => std.process.fatal("oom", .{}),
         error.Quota => unreachable, // we are running with infinite quota, see RunOptions
@@ -37,16 +37,13 @@ test ExampleInterpreter {
 }
 
 /// This is the type definition for your evaluation context. Every Scripty
-/// expression will start by accessing a field of this struct (e.g. `$version`,
-/// `$page`, `$site`).
+/// expression will start by accessing a field of this struct (e.g.
+/// `$version`, `$page`, `$site`).
 ///
-/// You have the ability to personalize the behavior of Scripty whenever
-/// evaluating a field navigation expression (eg `$page.title`).
-/// By using `scripty.defaultDot` the expression will be mapped 1:1 to struct
-/// navigation (i.e. `$page.title` will return the `title` field of `Page`).
-/// When usind `scripty.defaultDot`, any field that start with an underscore
-/// will NOT be accessible through Scripty. This is useful to make available
-/// resources such as allocators to builtin function implementations, while
+/// Field navigation (eg '$page.title') maps 1:1 to struct field
+/// navigation. If you want a field to NOT be accessible by users via
+/// Scripty, prefix it with '_'. This is useful to make available resources
+/// such as allocators to builtin function implementations, while
 /// preventing the user from being able to access them directly.
 ///
 /// See below the definition of `ExampleValue` to learn the possible values
@@ -56,13 +53,12 @@ const ExampleContext = struct {
     page: Page,
     site: Site,
 
-    // Private, `defaultDot` won't make it accessible to users.
+    // Private, won't be accessible to users.
     _force_https: bool,
 
     // Whether the value should be passed by copy or by pointer to
-    // functions.
+    // builtin functions (the builtin function signature must match).
     pub const PassByRef = true;
-    pub const dot = scripty.defaultDot(ExampleContext, ExampleValue, false);
     pub const Builtins = struct {};
 
     pub const Site = struct {
@@ -70,7 +66,6 @@ const ExampleContext = struct {
         hostname: []const u8,
 
         pub const PassByRef = true;
-        pub const dot = scripty.defaultDot(Site, ExampleValue, false);
 
         /// This is a convention used by `defaultCall` (see below the definition of `ExampleValue`).
         /// Each definition inside of `Builtins` is a builtin function that users will be able
@@ -105,22 +100,15 @@ const ExampleContext = struct {
         content: []const u8,
 
         pub const PassByRef = true;
-        pub const dot = scripty.defaultDot(Page, ExampleValue, false);
         pub const Builtins = struct {};
     };
 };
 
 /// This union defines the various value types that can be returned by a Scripty
 /// expression.
+///
 /// In Scripty basic types (string, int, float, bool, err) are expected to be present,
 /// but everything else is for you to define.
-///
-/// Although this type is listed below `ExampleContext`, Scripty evaluation
-/// starts from this definition. For example field navigation ('$foo.bar')
-/// starts by evaluating `ExampleValue.dot()`, which for non-primitive types
-/// will delegate to the `dot` definition in each type (which in the current
-/// example will always result into calling `defaultDot` with the semantics
-/// explained above).
 ///
 /// Note that field navigation ('$foo.bar') and builtin function calling ('$foo.baz()')
 /// are handled separately (see `ExampleValue.call`).
@@ -146,23 +134,6 @@ pub const ExampleValue = union(Tag) {
         err,
         nil,
     };
-
-    pub fn dot(
-        self: ExampleValue,
-        gpa: std.mem.Allocator,
-        path: []const u8,
-    ) error{OutOfMemory}!ExampleValue {
-        switch (self) {
-            .string,
-            .bool,
-            .int,
-            .float,
-            .err,
-            .nil,
-            => return .{ .err = "primitive value" },
-            inline else => |v| return v.dot(gpa, path),
-        }
-    }
 
     pub const call = scripty.defaultCall(ExampleValue, ExampleContext);
 

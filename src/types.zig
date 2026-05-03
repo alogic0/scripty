@@ -1,35 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-pub fn defaultDot(
-    comptime Context: type,
-    comptime Value: type,
-    comptime mutable: bool,
-) fn (constify(Context, mutable), Allocator, []const u8) error{OutOfMemory}!Value {
-    return struct {
-        pub fn dot(
-            self: constify(Context, mutable),
-            gpa: Allocator,
-            path: []const u8,
-        ) !Value {
-            const info = @typeInfo(Context).@"struct";
-            inline for (info.fields) |f| {
-                if (f.name[0] == '_') continue;
-                if (std.mem.eql(u8, f.name, path)) {
-                    const by_ref = @typeInfo(f.type) == .@"struct" and @hasDecl(f.type, "PassByRef") and f.type.PassByRef;
-                    if (by_ref) {
-                        return Value.from(gpa, &@field(self, f.name));
-                    } else {
-                        return Value.from(gpa, @field(self, f.name));
-                    }
-                }
-            }
-
-            return .{ .err = "field not found" };
-        }
-    }.dot;
-}
-
 pub fn defaultCall(Value: type, Context: type) fn (
     Value,
     Allocator,
