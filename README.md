@@ -4,9 +4,10 @@ Scripty is a tiny scripting language meant to be embedded in strings or other
 similar constructs within a host document.
 
 Scripty supports only the basic syntax necessary to build expressions:
- - access fields (eg `$foo.bar`)
- - call functions (eg `$foo.baz()`)
- - refer to basic literals (`'string'`, `"string"`, `10`, `0.5`, `true`, `false`)
+
+- access fields (eg `$foo.bar`)
+- call functions (eg `$foo.baz()`, `$foo.bax($foo.bar, 10, true)`)
+- refer to basic literals (`'string'`, `"string"`, `10`, `0.5`, `true`, `false`)
 
 The evaluation context for a Scripty expression is entirely defined by you.
 
@@ -23,7 +24,6 @@ This example contains three Scripty expressions:
 - `$site.page('about')`
 - `$ctx.about.link()`
 - `$ctx.about.title`
-
 
 # Usage
 
