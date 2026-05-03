@@ -521,14 +521,18 @@ test "interrupt" {
 }
 
 test "fuzz" {
+    // const fuzz_log = try Io.Dir.cwd().createFile(std.testing.io, "fuzz.log", .{ .truncate = false });
+    // var file_writer = fuzz_log.writerStreaming(std.testing.io, &.{});
+    // try std.testing.fuzz(&file_writer.interface, testOne, .{});
     try std.testing.fuzz({}, testOne, .{});
 }
 
-fn testOne(context: void, smith: *std.testing.Smith) !void {
-    _ = context;
-
+// fn testOne(l: *Io.Writer, smith: *std.testing.Smith) !void {
+fn testOne(_: void, smith: *std.testing.Smith) !void {
     var buf: [1024]u8 = undefined;
     const input = buf[0..smith.slice(&buf)];
+
+    // try l.print("[{f}]\n", .{std.zig.fmtString(input)});
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
