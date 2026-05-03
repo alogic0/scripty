@@ -59,12 +59,21 @@ const ExampleContext = struct {
     // Whether the value should be passed by copy or by pointer to
     // builtin functions (the builtin function signature must match).
     pub const PassByRef = true;
+
+    // Marks this type as being navigable via dot syntax (eg '$foo.bar').
+    // Note that this is unrelated to being able to call builtin functions
+    // on this type (eg '$foo.baz()').
+    // Fields prefixed by an underscore will remain private (ie not
+    // navigable by users).
+    pub const Dot = true;
+
     pub const Builtins = struct {};
 
     pub const Site = struct {
         name: []const u8,
         hostname: []const u8,
 
+        pub const Dot = true;
         pub const PassByRef = true;
 
         /// This is a convention used by `defaultCall` (see below the definition of `ExampleValue`).
@@ -99,6 +108,7 @@ const ExampleContext = struct {
         title: []const u8,
         content: []const u8,
 
+        pub const Dot = true;
         pub const PassByRef = true;
         pub const Builtins = struct {};
     };

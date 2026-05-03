@@ -310,18 +310,21 @@ fn dot(
     component: []const u8,
 ) error{OutOfMemory}!ValueUnion {
     const not_found: ValueUnion = .{ .err = "field not found" };
+    const no_fields: ValueUnion = .{ .err = "type has no fields" };
 
     switch (value) {
         inline else => |v| {
-            const info = switch (@typeInfo(@TypeOf(v))) {
-                .@"struct" => |str| str,
+            const info, const T = switch (@typeInfo(@TypeOf(v))) {
+                .@"struct" => |str| .{ str, @TypeOf(v) },
                 .pointer => |ptr| switch (@typeInfo(ptr.child)) {
-                    .@"struct" => |str| str,
-                    else => return not_found,
+                    .@"struct" => |str| .{ str, ptr.child },
+                    else => return no_fields,
                 },
-                else => return not_found,
+                else => return no_fields,
                 // else => @compileError("TODO: add support for " ++ @typeName(@TypeOf(v))),
             };
+
+            if (!@hasDecl(T, "Dot") or !T.Dot) return no_fields;
 
             inline for (info.fields) |f| {
                 if (f.name[0] == '_') continue;
@@ -363,22 +366,6 @@ pub const TestValue = union(Tag) {
         err,
         nil,
     };
-    pub fn dot(
-        self: TestValue,
-        gpa: std.mem.Allocator,
-        path: []const u8,
-    ) error{OutOfMemory}!TestValue {
-        switch (self) {
-            .string,
-            .bool,
-            .int,
-            .float,
-            .err,
-            .nil,
-            => return .{ .err = "primitive value" },
-            inline else => |v| return v.dot(gpa, path),
-        }
-    }
 
     pub const call = types.defaultCall(TestValue, TestContext);
 
@@ -449,15 +436,18 @@ const TestContext = struct {
     pub const Site = struct {
         name: []const u8,
 
+        pub const Dot = true;
         pub const PassByRef = true;
     };
     pub const Page = struct {
         title: []const u8,
         content: []const u8,
 
+        pub const Dot = true;
         pub const PassByRef = true;
     };
 
+    pub const Dot = true;
     pub const PassByRef = true;
 };
 
