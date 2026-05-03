@@ -8,4 +8,5 @@ pub const defaultCall = types.defaultCall;
 
 test {
     _ = vm;
+    _ = @import("example.zig");
 }
