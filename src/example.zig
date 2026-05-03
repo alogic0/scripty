@@ -4,7 +4,7 @@ const scripty = @import("root.zig"); // In your case this would be @import("scri
 
 /// A Scripty VM is created by providing a Context and a Value type which
 /// make up the Scripty evaluation context.
-const ExampleVM = scripty.VM(ExampleContext, ExampleValue);
+const ExampleVM = scripty.VM(ExampleRoot, ExampleValueUnion);
 
 test ExampleVM {
     var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
@@ -13,7 +13,7 @@ test ExampleVM {
     const arena = arena_state.allocator();
 
     const src = "$site.link()";
-    var ctx: ExampleContext = .{
+    var ctx: ExampleRoot = .{
         .version = "v0",
         .page = .{
             .title = "Home",
@@ -32,23 +32,24 @@ test ExampleVM {
         error.Quota => unreachable, // we are running with infinite quota, see RunOptions
     };
 
-    const value: ExampleValue = result.value;
+    const value: ExampleValueUnion = result.value;
     try std.testing.expectEqualStrings("https://example.com", value.string);
 }
 
-/// This is the type definition for your evaluation context. Every Scripty
-/// expression will start by accessing a field of this struct (e.g.
-/// `$version`, `$page`, `$site`).
+/// This is the type definition for the root of your evaluation context.
+/// Every Scripty expression will start by accessing a field of this struct
+/// (e.g. `$version`, `$page`, `$site`).
 ///
-/// Field navigation (eg '$page.title') maps 1:1 to struct field
-/// navigation. If you want a field to NOT be accessible by users via
-/// Scripty, prefix it with '_'. This is useful to make available resources
-/// such as allocators to builtin function implementations, while
-/// preventing the user from being able to access them directly.
+/// Field navigation (eg '$page.title') maps 1:1 to struct field navigation
+/// when the corresponding struct definition contains a `Dot` decl set to
+/// true (all fields will be private otherwise). If you want a field to NOT
+/// be accessible by users via Scripty, when `Dot = true`, prefix it with
+/// '_'. This is useful to make available resources such as allocators to
+/// builtin function implementations.
 ///
 /// See below the definition of `ExampleValue` to learn the possible values
 /// that a Scripty expression can evaluate to.
-const ExampleContext = struct {
+const ExampleRoot = struct {
     version: []const u8,
     page: Page,
     site: Site,
@@ -60,7 +61,7 @@ const ExampleContext = struct {
     // builtin functions (the builtin function signature must match).
     pub const PassByRef = true;
 
-    // Marks this type as being navigable via dot syntax (eg '$foo.bar').
+    // Marks this type as being navigable via dot syntax (eg '$version').
     // Note that this is unrelated to being able to call builtin functions
     // on this type (eg '$foo.baz()').
     // Fields prefixed by an underscore will remain private (ie not
@@ -86,11 +87,11 @@ const ExampleContext = struct {
                     gpa: Allocator,
                     // Root context is always made available to give you easy access
                     // to resources hidden in private fields.
-                    ctx: *const ExampleContext,
-                    args: []const ExampleValue,
-                ) !ExampleValue {
+                    ctx: *const ExampleRoot,
+                    args: []const ExampleValueUnion,
+                ) !ExampleValueUnion {
                     // Make sure to validate your arguments!
-                    const bad_arg: ExampleValue = .{ .err = "expected 0 arguments" };
+                    const bad_arg: ExampleValueUnion = .{ .err = "expected 0 arguments" };
                     if (args.len != 0) return bad_arg;
 
                     return .{
@@ -117,15 +118,22 @@ const ExampleContext = struct {
 /// This union defines the various value types that can be returned by a Scripty
 /// expression.
 ///
-/// In Scripty basic types (string, int, float, bool, err) are expected to be present,
-/// but everything else is for you to define.
+/// It's your job to map literals to their corresponding union case (see
+/// `fromStringLiteral()` for example), including mapping them to an
+/// evaluation error, if so desired.
 ///
-/// Note that field navigation ('$foo.bar') and builtin function calling ('$foo.baz()')
-/// are handled separately (see `ExampleValue.call`).
-pub const ExampleValue = union(Tag) {
-    global: *const ExampleContext,
-    site: *const ExampleContext.Site,
-    page: *const ExampleContext.Page,
+/// What values should exist in your evaluation context is entirely up to you
+/// except for one case: errors. The `err: []const u8` union case is required
+/// by Scripty as it is used to report all kinds of runtime evaluation errors.
+///
+/// When a Scripty VM is embedded in a host language it's also possible that
+/// the host language also places ulterior requirements on the structure of
+/// the evaluation context. For example SuperHTML requires the existence
+/// of Optionals, Iterators, and a few other things.
+pub const ExampleValueUnion = union(Tag) {
+    global: *const ExampleRoot,
+    site: *const ExampleRoot.Site,
+    page: *const ExampleRoot.Page,
     string: []const u8,
     bool: bool,
     int: usize,
@@ -145,7 +153,7 @@ pub const ExampleValue = union(Tag) {
         nil,
     };
 
-    pub const call = scripty.defaultCall(ExampleValue, ExampleContext);
+    pub const call = scripty.defaultCall(ExampleValueUnion, ExampleRoot);
 
     // This function is used to provide builtins to primitive types.
     // In this case we're giving a builtin function named `len` to strings
@@ -156,46 +164,46 @@ pub const ExampleValue = union(Tag) {
                 pub fn call(
                     str: []const u8,
                     gpa: std.mem.Allocator,
-                    _: *const ExampleContext,
-                    args: []const ExampleValue,
-                ) !ExampleValue {
+                    _: *const ExampleRoot,
+                    args: []const ExampleValueUnion,
+                ) !ExampleValueUnion {
                     if (args.len != 0) return .{
                         .err = "'len' wants no arguments",
                     };
-                    return ExampleValue.from(gpa, str.len);
+                    return ExampleValueUnion.from(gpa, str.len);
                 }
             };
         };
         return switch (tag) {
             .string => StringBuiltins,
             .bool, .int, .float, .err, .nil => struct {},
-            else => |t| @typeInfo(@FieldType(ExampleValue, @tagName(t))).pointer.child.Builtins,
+            else => |t| @typeInfo(@FieldType(ExampleValueUnion, @tagName(t))).pointer.child.Builtins,
         };
     }
 
     // This and the subsequent functions define which value to map each literal.
-    pub fn fromStringLiteral(bytes: []const u8) ExampleValue {
+    pub fn fromStringLiteral(bytes: []const u8) ExampleValueUnion {
         return .{ .string = bytes };
     }
 
-    pub fn fromNumberLiteral(bytes: []const u8) ExampleValue {
+    pub fn fromNumberLiteral(bytes: []const u8) ExampleValueUnion {
         _ = bytes;
-        return .{ .int = 0 };
+        return .{ .int = 0 }; // TODO: perform proper parsing
     }
 
-    pub fn fromBooleanLiteral(b: bool) ExampleValue {
+    pub fn fromBooleanLiteral(b: bool) ExampleValueUnion {
         return .{ .bool = b };
     }
 
     // This is a general-purpose type-mapping function, you generally want
     // to add an entry whenever you see a compile error about value mapping.
-    pub fn from(gpa: std.mem.Allocator, value: anytype) !ExampleValue {
+    pub fn from(gpa: std.mem.Allocator, value: anytype) !ExampleValueUnion {
         _ = gpa;
         const T = @TypeOf(value);
         switch (T) {
-            *ExampleContext, *const ExampleContext => return .{ .global = value },
-            *const ExampleContext.Site => return .{ .site = value },
-            *const ExampleContext.Page => return .{ .page = value },
+            *ExampleRoot, *const ExampleRoot => return .{ .global = value },
+            *const ExampleRoot.Site => return .{ .site = value },
+            *const ExampleRoot.Page => return .{ .page = value },
             []const u8 => return .{ .string = value },
             usize => return .{ .int = value },
             else => @compileError("TODO: add support for " ++ @typeName(T)),
