@@ -12,7 +12,7 @@ pub const Diagnostics = struct {
     loc: Tokenizer.Token.Loc,
 };
 
-pub const RunError = error{ OutOfMemory, Interrupt, Quota };
+pub const RunError = error{ OutOfMemory, Quota };
 
 pub fn VM(
     comptime _Context: type,
@@ -21,7 +21,7 @@ pub fn VM(
     return struct {
         parser: Parser = .{},
         stack: std.MultiArrayList(Result) = .{},
-        state: enum { ready, waiting, pending } = .ready,
+        state: enum { ready, pending } = .ready,
 
         pub fn deinit(self: @This(), gpa: std.mem.Allocator) void {
             self.stack.deinit(gpa);
@@ -48,14 +48,6 @@ pub fn VM(
 
         const ScriptyVM = @This();
 
-        pub fn insertValue(vm: *ScriptyVM, v: Value) void {
-            std.debug.assert(vm.state == .waiting);
-            const stack_values = vm.stack.items(.value);
-            stack_values[stack_values.len - 1] = v;
-            vm.state = .pending;
-            vm.ext = undefined;
-        }
-
         pub fn reset(vm: *ScriptyVM) void {
             vm.stack.shrinkRetainingCapacity(0);
             vm.state = .ready;
@@ -73,7 +65,6 @@ pub fn VM(
             log.debug("State: {s}", .{@tagName(vm.state)});
             switch (vm.state) {
                 .ready => {},
-                .waiting => unreachable, // programming error
                 .pending => {
                     const result = vm.stack.get(vm.stack.len - 1);
                     if (result.value == .err) {
@@ -85,7 +76,7 @@ pub fn VM(
 
             // On error make the vm usable again.
             errdefer |err| switch (@as(RunError, err)) {
-                error.Quota, error.Interrupt => {},
+                error.Quota => {},
                 else => vm.reset(),
             };
 
@@ -272,10 +263,6 @@ pub fn VM(
 
                             break :blk old_value.call(gpa, ctx, fn_name, args) catch |err| switch (err) {
                                 error.OutOfMemory => return error.OutOfMemory,
-                                error.Interrupt => {
-                                    vm.state = .waiting;
-                                    return error.Interrupt;
-                                },
                             };
                         };
 
@@ -379,21 +366,6 @@ pub const TestValue = union(Tag) {
                     _: []const TestValue,
                 ) !TestValue {
                     @panic("crash found!");
-                }
-            };
-            pub const ext = struct {
-                pub fn call(
-                    str: []const u8,
-                    gpa: std.mem.Allocator,
-                    _: *const TestContext,
-                    args: []const TestValue,
-                ) !TestValue {
-                    if (args.len != 0) return .{
-                        .err = "'ext' wants no arguments",
-                    };
-                    _ = str;
-                    _ = gpa;
-                    return error.Interrupt;
                 }
             };
         };
@@ -506,20 +478,6 @@ test "builtin" {
     try std.testing.expectEqualDeep(ex, result);
 }
 
-test "interrupt" {
-    const code = "$page.title.ext()";
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
-    var t = test_ctx;
-    var vm: TestInterpreter = .{};
-    try std.testing.expectError(
-        error.Interrupt,
-        vm.run(arena.allocator(), &t, code, .{}),
-    );
-}
-
 test "fuzz" {
     // const fuzz_log = try Io.Dir.cwd().createFile(std.testing.io, "fuzz.log", .{ .truncate = false });
     // var file_writer = fuzz_log.writerStreaming(std.testing.io, &.{});
@@ -542,7 +500,6 @@ fn testOne(_: void, smith: *std.testing.Smith) !void {
     while (true) {
         _ = vm.run(arena.allocator(), &t, input, .{}) catch |err| switch (err) {
             error.OutOfMemory => return,
-            error.Interrupt => continue,
             error.Quota => unreachable,
         };
         return;

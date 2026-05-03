@@ -36,7 +36,7 @@ pub fn defaultCall(Value: type, Context: type) fn (
     *const Context,
     []const u8,
     []const Value,
-) error{ OutOfMemory, Interrupt }!Value {
+) error{OutOfMemory}!Value {
     return struct {
         pub fn call(
             value: Value,
@@ -44,7 +44,7 @@ pub fn defaultCall(Value: type, Context: type) fn (
             ctx: *const Context,
             fn_name: []const u8,
             args: []const Value,
-        ) error{ OutOfMemory, Interrupt }!Value {
+        ) error{OutOfMemory}!Value {
             switch (value) {
                 inline else => |v, tag| {
                     const Builtin = if (@hasDecl(Value, "builtinsFor"))

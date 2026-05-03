@@ -28,7 +28,6 @@ test ExampleInterpreter {
 
     var vm: ExampleInterpreter = .{};
     const result = while (true) break vm.run(arena, &ctx, src, .{}) catch |err| switch (err) {
-        error.Interrupt => continue, // builtin functions can trigger interrupts if they wish
         error.OutOfMemory => std.process.fatal("oom", .{}),
         error.Quota => unreachable, // we are running with infinite quota, see RunOptions
     };
