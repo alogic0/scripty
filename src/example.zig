@@ -2,6 +2,41 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const scripty = @import("root.zig"); // In your case this would be @import("scripty")
 
+/// A Scripty VM is created by providing a Context and a Value type which
+/// make up the Scripty evaluation context.
+const ExampleInterpreter = scripty.VM(ExampleContext, ExampleValue);
+
+test ExampleInterpreter {
+    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const arena = arena_state.allocator();
+
+    const src = "$site.link()";
+    var ctx: ExampleContext = .{
+        .version = "v0",
+        .page = .{
+            .title = "Home",
+            .content = "<p>Welcome!</p>",
+        },
+        .site = .{
+            .name = "Example Website",
+            .hostname = "example.com",
+        },
+        ._force_https = true,
+    };
+
+    var vm: ExampleInterpreter = .{};
+    const result = while (true) break vm.run(arena, &ctx, src, .{}) catch |err| switch (err) {
+        error.Interrupt => continue, // builtin functions can trigger interrupts if they wish
+        error.OutOfMemory => std.process.fatal("oom", .{}),
+        error.Quota => unreachable, // we are running with infinite quota, see RunOptions
+    };
+
+    const value: ExampleValue = result.value;
+    try std.testing.expectEqualStrings("https://example.com", value.string);
+}
+
 /// This is the type definition for your evaluation context. Every Scripty
 /// expression will start by accessing a field of this struct (e.g. `$version`,
 /// `$page`, `$site`).
@@ -187,36 +222,3 @@ pub const ExampleValue = union(Tag) {
         }
     }
 };
-
-const ExampleInterpreter = scripty.VM(ExampleContext, ExampleValue);
-
-test ExampleInterpreter {
-    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
-    defer arena_state.deinit();
-
-    const arena = arena_state.allocator();
-
-    const src = "$site.link()";
-    var ctx: ExampleContext = .{
-        .version = "v0",
-        .page = .{
-            .title = "Home",
-            .content = "<p>Welcome!</p>",
-        },
-        .site = .{
-            .name = "Example Website",
-            .hostname = "example.com",
-        },
-        ._force_https = true,
-    };
-
-    var vm: ExampleInterpreter = .{};
-    const result = while (true) break vm.run(arena, &ctx, src, .{}) catch |err| switch (err) {
-        error.Interrupt => continue, // builtin functions can trigger interrupts if they wish
-        error.OutOfMemory => std.process.fatal("oom", .{}),
-        error.Quota => unreachable, // we are running with infinite quota, see RunOptions
-    };
-
-    const value: ExampleValue = result.value;
-    try std.testing.expectEqualStrings("https://example.com", value.string);
-}
