@@ -106,9 +106,6 @@ pub const Value = union(enum) {
     /// be accessible by users via Scripty, when `Dot = true`, prefix it with
     /// '_'. This is useful to make available resources such as allocators to
     /// builtin function implementations.
-    ///
-    /// See below the definition of `ExampleValue` to learn the possible values
-    /// that a Scripty expression can evaluate to.
     const Root = struct {
         version: []const u8,
         page: Page,
