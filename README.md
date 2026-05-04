@@ -50,7 +50,7 @@ by allowing Scripty expressions inside of link syntax.
 ```markdown
 A heading that specifies id and classes:
 
-# [Title](<$heading.id('foo').attrs('bar',> "baz"))
+# [Title](<$heading.id('foo').attrs('bar', "baz")>)
 
 Video embed:
 [](<$video.asset('video.mp4').autoplay(true).muted(false)>)
