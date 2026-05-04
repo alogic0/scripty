@@ -64,16 +64,18 @@ pub const Token = struct {
         comma,
         lparen,
         rparen,
-        string,
         identifier,
-        number,
+        string,
+        integer,
+        float,
 
         pub fn lexeme(self: Tag) ?[]const u8 {
             return switch (self) {
                 .invalid,
                 .string,
                 .identifier,
-                .number,
+                .integer,
+                .float,
                 => null,
                 .dollar => "$",
                 .dot => ".",
@@ -89,8 +91,8 @@ const State = enum {
     invalid,
     start,
     identifier,
-    number,
     string,
+    number,
 };
 
 pub fn next(tokenizer: *Tokenizer, src: []const u8) ?Token {
@@ -101,6 +103,9 @@ pub fn next(tokenizer: *Tokenizer, src: []const u8) ?Token {
             .end = undefined,
         },
     };
+
+    // Used when parsing numbers
+    var seen_dot: u32 = 0;
 
     state: switch (State.start) {
         .start => start: switch (tokenizer.char(src)) {
@@ -190,12 +195,29 @@ pub fn next(tokenizer: *Tokenizer, src: []const u8) ?Token {
             },
         },
         .number => number: switch (tokenizer.char(src)) {
-            '0'...'9', '.', '_' => {
+            '0'...'9', '_' => {
                 tokenizer.idx += 1;
                 continue :number tokenizer.char(src);
             },
+            '.' => {
+                if (seen_dot != 0) {
+                    tok.tag = .invalid;
+                    tok.loc.end = tokenizer.idx;
+                    break :state;
+                }
+
+                tokenizer.idx += 1;
+                seen_dot = tokenizer.idx;
+                continue :number tokenizer.char(src);
+            },
             else => {
-                tok.tag = .number;
+                if (seen_dot == tokenizer.idx) {
+                    tok.tag = .invalid;
+                    tok.loc.end = tokenizer.idx;
+                    break :state;
+                }
+
+                tok.tag = if (seen_dot == 0) .integer else .float;
                 tok.loc.end = tokenizer.idx;
                 break :state;
             },
@@ -276,7 +298,7 @@ test "general language" {
             .dollar,
             .identifier,
             .lparen,
-            .number,
+            .float,
             .rparen,
         } },
         .{ .code = "$authors.split(1, 2, 3).not()", .expected = &.{
@@ -285,11 +307,11 @@ test "general language" {
             .dot,
             .identifier,
             .lparen,
-            .number,
+            .integer,
             .comma,
-            .number,
+            .integer,
             .comma,
-            .number,
+            .integer,
             .rparen,
             .dot,
             .identifier,
@@ -388,6 +410,73 @@ test "strings" {
         errdefer std.debug.print(".{s} => `{s}`\n", .{ @tagName(t.tag), src });
         try std.testing.expectEqual(@as(Token.Tag, .string), t.tag);
         try std.testing.expectEqual(@as(?Token, null), it.next(case));
+    }
+}
+
+test "integers" {
+    const cases =
+        \\1
+        \\10
+        \\100
+    .*;
+    var cases_it = std.mem.tokenizeScalar(u8, &cases, '\n');
+    while (cases_it.next()) |case| {
+        errdefer std.debug.print("Case: {s}\n", .{case});
+
+        var it: Tokenizer = .{};
+        errdefer std.debug.print("Tokenizer idx: {}\n", .{it.idx});
+        const t = it.next(case) orelse return error.Null;
+        errdefer std.debug.print("tok: {}\n", .{t});
+        if (t.loc.end > case.len + 1) return error.OutOfBounds;
+        const src = case[t.loc.start..t.loc.end];
+        errdefer std.debug.print(".{s} => `{s}`\n", .{ @tagName(t.tag), src });
+        try std.testing.expectEqual(@as(Token.Tag, .integer), t.tag);
+        try std.testing.expectEqual(@as(?Token, null), it.next(case));
+    }
+}
+
+test "floats" {
+    const cases =
+        \\1.0
+        \\10.0
+        \\100.00
+        \\1_234.54564
+    .*;
+    var cases_it = std.mem.tokenizeScalar(u8, &cases, '\n');
+    while (cases_it.next()) |case| {
+        errdefer std.debug.print("Case: {s}\n", .{case});
+
+        var it: Tokenizer = .{};
+        errdefer std.debug.print("Tokenizer idx: {}\n", .{it.idx});
+        const t = it.next(case) orelse return error.Null;
+        errdefer std.debug.print("tok: {}\n", .{t});
+        if (t.loc.end > case.len + 1) return error.OutOfBounds;
+        const src = case[t.loc.start..t.loc.end];
+        errdefer std.debug.print(".{s} => `{s}`\n", .{ @tagName(t.tag), src });
+        try std.testing.expectEqual(@as(Token.Tag, .float), t.tag);
+        try std.testing.expectEqual(@as(?Token, null), it.next(case));
+    }
+}
+
+test "bad numbers" {
+    const cases =
+        \\1.0.
+        \\1.00.00
+        \\1234.54.5.64
+        \\0.
+    .*;
+    var cases_it = std.mem.tokenizeScalar(u8, &cases, '\n');
+    while (cases_it.next()) |case| {
+        errdefer std.debug.print("Case: {s}\n", .{case});
+
+        var it: Tokenizer = .{};
+        errdefer std.debug.print("Tokenizer idx: {}\n", .{it.idx});
+        const t = it.next(case) orelse return error.Null;
+        errdefer std.debug.print("tok: {}\n", .{t});
+        if (t.loc.end > case.len + 1) return error.OutOfBounds;
+        const src = case[t.loc.start..t.loc.end];
+        errdefer std.debug.print(".{s} => `{s}`\n", .{ @tagName(t.tag), src });
+        try std.testing.expectEqual(@as(Token.Tag, .invalid), t.tag);
     }
 }
 

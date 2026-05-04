@@ -34,9 +34,10 @@ pub const Node = struct {
         true,
         false,
         string,
-        number,
+        integer,
+        float,
         // do not put errors above this line
-        // first error must be err_token
+        // first error must be err_invalid_token
         err_invalid_token,
         err_unexpected_token,
         err_missing_dollar,
@@ -195,9 +196,13 @@ pub fn next(p: *Parser, code: []const u8) ?Node {
                 p.state = .extend_call;
                 return .{ .tag = .string, .loc = tok.loc };
             },
-            .number => {
+            .integer => {
                 p.state = .extend_call;
-                return .{ .tag = .number, .loc = tok.loc };
+                return .{ .tag = .integer, .loc = tok.loc };
+            },
+            .float => {
+                p.state = .extend_call;
+                return .{ .tag = .float, .loc = tok.loc };
             },
             else => return p.syntaxError(.err_unexpected_token, tok.loc),
         },
@@ -275,8 +280,8 @@ test "basics" {
         .string,
         .path,
         .call,
-        .number,
-        .number,
+        .integer,
+        .integer,
         .apply,
         .string,
         .apply,

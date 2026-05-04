@@ -3,7 +3,6 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const tracy = @import("tracy");
-const types = @import("types.zig");
 const Tokenizer = @import("Tokenizer.zig");
 const Parser = @import("Parser.zig");
 
@@ -15,10 +14,32 @@ pub const Diagnostics = struct {
 
 pub const RunError = error{ OutOfMemory, Quota };
 
-pub fn VM(
-    comptime _Context: type,
-    comptime _Value: type,
-) type {
+fn validateValue(V: type) void {
+    const info = @typeInfo(V);
+    if (info != .@"union") @compileError("Value must be a tagged union.");
+    const u = info.@"union";
+    if (u.tag_type == null) @compileError("Value must be a tagged union.");
+    if (!@hasField(V, "root"))
+        @compileError("Value must have a 'root' field");
+
+    switch (@typeInfo(@FieldType(V, "root"))) {
+        .@"struct" => {},
+        .pointer => |ptr| switch (@typeInfo(ptr.child)) {
+            .@"struct" => {
+                if (ptr.size != .one)
+                    @compileError("Value.root must be a struct or a pointer to a struct");
+            },
+            else => @compileError("Value.root must be a struct or a pointer to a struct"),
+        },
+        else => @compileError("Value.root must be a struct or a pointer to a struct"),
+    }
+
+    if (!@hasField(V, "err") or @FieldType(V, "err") != []const u8)
+        @compileError("Value must have a 'err: []const u8' field.");
+}
+
+pub fn VM(comptime _Value: type) type {
+    validateValue(_Value);
     return struct {
         parser: Parser = .{},
         stack: std.MultiArrayList(Result) = .{},
@@ -28,8 +49,8 @@ pub fn VM(
             self.stack.deinit(gpa);
         }
 
-        pub const Context = _Context;
         pub const Value = _Value;
+        pub const RootRef = @FieldType(Value, "root");
 
         pub const Result = struct {
             debug: if (builtin.mode == .Debug)
@@ -58,7 +79,7 @@ pub fn VM(
         pub fn run(
             vm: *ScriptyVM,
             gpa: std.mem.Allocator,
-            ctx: *Context,
+            ctx: RootRef,
             src: []const u8,
             opts: RunOptions,
         ) RunError!Result {
@@ -134,9 +155,14 @@ pub fn VM(
                         .value = Value.fromStringLiteral(try node.loc.unquote(gpa, src)),
                         .loc = node.loc,
                     }),
-                    .number => try vm.stack.append(gpa, .{
+                    .integer => try vm.stack.append(gpa, .{
                         .debug = .set,
-                        .value = Value.fromNumberLiteral(node.loc.slice(src)),
+                        .value = Value.fromIntegerLiteral(node.loc.slice(src)),
+                        .loc = node.loc,
+                    }),
+                    .float => try vm.stack.append(gpa, .{
+                        .debug = .set,
+                        .value = Value.fromFloatLiteral(node.loc.slice(src)),
                         .loc = node.loc,
                     }),
                     .true => try vm.stack.append(gpa, .{
@@ -262,7 +288,7 @@ pub fn VM(
                             const apply_zone = tracy.traceNamed(@src(), "apply");
                             defer apply_zone.end();
 
-                            break :blk old_value.call(gpa, ctx, fn_name, args) catch |err| switch (err) {
+                            break :blk call(RootRef, Value, gpa, old_value, ctx, fn_name, args) catch |err| switch (err) {
                                 error.OutOfMemory => return error.OutOfMemory,
                             };
                         };
@@ -303,6 +329,63 @@ pub fn VM(
     };
 }
 
+fn call(
+    RootRef: type,
+    ValueUnion: type,
+    gpa: Allocator,
+    value: ValueUnion,
+    root: RootRef,
+    fn_name: []const u8,
+    args: []ValueUnion,
+) error{OutOfMemory}!ValueUnion {
+    const not_found: ValueUnion = .{ .err = "builtin function not found" };
+    const no_builtins: ValueUnion = .{ .err = "this type has no builtin functions" };
+
+    switch (value) {
+        inline else => |v| {
+            const Builtins = switch (@typeInfo(@TypeOf(v))) {
+                .@"struct" => @TypeOf(v).Builtins,
+                .pointer => |ptr| switch (@typeInfo(ptr.child)) {
+                    .@"struct" => ptr.child.Builtins,
+                    else => return no_builtins,
+                },
+                else => return no_builtins,
+            };
+
+            inline for (@typeInfo(Builtins).@"struct".decls) |decl| {
+                if (decl.name[0] == '_') continue;
+                if (std.mem.eql(u8, decl.name, fn_name)) {
+                    return @field(Builtins, decl.name).call(
+                        v,
+                        gpa,
+                        root,
+                        args,
+                    );
+                }
+            }
+
+            if (hasDecl(@TypeOf(v), "fallbackCall")) {
+                return v.fallbackCall(
+                    gpa,
+                    root,
+                    fn_name,
+                    args,
+                );
+            }
+
+            return not_found;
+        },
+    }
+}
+
+inline fn hasDecl(T: type, comptime decl: []const u8) bool {
+    return switch (@typeInfo(T)) {
+        else => false,
+        .pointer => |p| return hasDecl(p.child, decl),
+        .@"struct", .@"union", .@"enum", .@"opaque" => return @hasDecl(T, decl),
+    };
+}
+
 fn dot(
     gpa: Allocator,
     ValueUnion: type,
@@ -324,6 +407,10 @@ fn dot(
                 // else => @compileError("TODO: add support for " ++ @typeName(@TypeOf(v))),
             };
 
+            if (@hasDecl(T, "dynamicDot") and @typeInfo(@TypeOf(T.dynamicDot)) == .@"fn") {
+                return v.dynamicDot(gpa, component);
+            }
+
             if (!@hasDecl(T, "Dot") or !T.Dot) return no_fields;
 
             inline for (info.fields) |f| {
@@ -344,36 +431,24 @@ fn dot(
     }
 }
 
-pub const TestValue = union(Tag) {
-    global: *const TestContext,
+pub const TestValue = union(enum) {
+    root: *const TestContext,
     site: *const TestContext.Site,
     page: *const TestContext.Page,
-    string: []const u8,
+    string: String,
     bool: bool,
     int: usize,
     float: f64,
     err: []const u8, // error message
     nil,
 
-    pub const Tag = enum {
-        global,
-        site,
-        page,
-        string,
-        bool,
-        int,
-        float,
-        err,
-        nil,
-    };
+    pub const String = struct {
+        value: []const u8,
 
-    pub const call = types.defaultCall(TestValue, TestContext);
-
-    pub fn builtinsFor(comptime tag: Tag) type {
-        const StringBuiltins = struct {
+        pub const Builtins = struct {
             pub const len = struct {
                 pub fn call(
-                    str: []const u8,
+                    str: String,
                     gpa: std.mem.Allocator,
                     _: *const TestContext,
                     args: []const TestValue,
@@ -381,12 +456,12 @@ pub const TestValue = union(Tag) {
                     if (args.len != 0) return .{
                         .err = "'len' wants no arguments",
                     };
-                    return TestValue.from(gpa, str.len);
+                    return TestValue.from(gpa, str.value.len);
                 }
             };
             pub const crash = struct {
                 pub fn call(
-                    _: []const u8,
+                    _: String,
                     _: std.mem.Allocator,
                     _: *const TestContext,
                     _: []const TestValue,
@@ -395,19 +470,20 @@ pub const TestValue = union(Tag) {
                 }
             };
         };
-        return switch (tag) {
-            .string => StringBuiltins,
-            else => struct {},
-        };
-    }
+    };
 
     pub fn fromStringLiteral(bytes: []const u8) TestValue {
-        return .{ .string = bytes };
+        return .{ .string = .{ .value = bytes } };
     }
 
-    pub fn fromNumberLiteral(bytes: []const u8) TestValue {
+    pub fn fromIntegerLiteral(bytes: []const u8) TestValue {
         _ = bytes;
         return .{ .int = 0 };
+    }
+
+    pub fn fromFloatLiteral(bytes: []const u8) TestValue {
+        _ = bytes;
+        return .{ .float = 0 };
     }
 
     pub fn fromBooleanLiteral(b: bool) TestValue {
@@ -418,10 +494,10 @@ pub const TestValue = union(Tag) {
         _ = gpa;
         const T = @TypeOf(value);
         switch (T) {
-            *TestContext, *const TestContext => return .{ .global = value },
+            *TestContext, *const TestContext => return .{ .root = value },
             *const TestContext.Site => return .{ .site = value },
             *const TestContext.Page => return .{ .page = value },
-            []const u8 => return .{ .string = value },
+            []const u8 => return .{ .string = .{ .value = value } },
             usize => return .{ .int = value },
             else => @compileError("TODO: add support for " ++ @typeName(T)),
         }
@@ -438,6 +514,7 @@ const TestContext = struct {
 
         pub const Dot = true;
         pub const PassByRef = true;
+        pub const Builtins = struct {};
     };
     pub const Page = struct {
         title: []const u8,
@@ -445,10 +522,12 @@ const TestContext = struct {
 
         pub const Dot = true;
         pub const PassByRef = true;
+        pub const Builtins = struct {};
     };
 
     pub const Dot = true;
     pub const PassByRef = true;
+    pub const Builtins = struct {};
 };
 
 const test_ctx: TestContext = .{
@@ -462,7 +541,7 @@ const test_ctx: TestContext = .{
     },
 };
 
-const TestInterpreter = VM(TestContext, TestValue);
+const TestInterpreter = VM(TestValue);
 
 test "basic" {
     const code = "$page.title";
@@ -476,10 +555,10 @@ test "basic" {
 
     const ex: TestInterpreter.Result = .{
         .loc = .{ .start = 0, .end = code.len },
-        .value = .{ .string = "Home" },
+        .value = .{ .string = .{ .value = "Home" } },
     };
 
-    errdefer log.debug("result = `{s}`\n", .{result.value.string});
+    errdefer log.debug("result = `{s}`\n", .{result.value.string.value});
 
     try std.testing.expectEqualDeep(ex, result);
 }
@@ -499,7 +578,7 @@ test "builtin" {
         .value = .{ .int = 4 },
     };
 
-    errdefer log.debug("result = `{s}`\n", .{result.value.string});
+    errdefer log.debug("result = `{s}`\n", .{result.value.string.value});
 
     try std.testing.expectEqualDeep(ex, result);
 }
