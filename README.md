@@ -1,17 +1,15 @@
 # Scripty
 
 Scripty is a tiny scripting language meant to be embedded in strings or other
-similar constructs within a host document.
+similar constructs, usually within a host document.
 
 Scripty supports only the basic syntax necessary to build expressions:
 
-- access fields (eg `$foo.bar`)
-- call functions (eg `$foo.baz()`, `$foo.bax($foo.bar, 10, true)`)
 - refer to basic literals (`'string'`, `"string"`, `10`, `0.5`, `true`, `false`)
+- access fields starting from a root evaluation context (eg `$foo.bar`)
+- call functions (eg `$foo.baz()`, `$foo.bax($foo.bar, 10, true)`)
 
-The evaluation context for a Scripty expression is entirely defined by you.
-
-Scripty is used by the [Zine](https://zine-ssg.io) static site generator.
+**The evaluation context for a Scripty expression is entirely defined by you.**
 
 # Embedding examples
 
@@ -20,7 +18,7 @@ Scripty is used by the [Zine](https://zine-ssg.io) static site generator.
 The [SuperHTML](https://github.com/kristoff-it/superhtml) templating language
 embeds Scripty expressions in HTML attributes. Plain HTML attributes can have
 values that depend on programming logic, while special attributes (generally
-prefixed by ':') are used to drive features such as looping and branching.
+prefixed by `:`) are used to drive features such as looping and branching.
 
 ```html
 <ul :loop="$page.subpages()">
