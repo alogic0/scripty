@@ -83,6 +83,22 @@ pub fn VM(comptime _Value: type) type {
             src: []const u8,
             opts: RunOptions,
         ) RunError!Result {
+            const res = vm.runInternal(gpa, ctx, src, opts);
+            _ = res catch |err| switch (@as(RunError, err)) {
+                error.Quota => {},
+                // On error make the vm usable again.
+                else => vm.reset(),
+            };
+            return res;
+        }
+
+        fn runInternal(
+            vm: *ScriptyVM,
+            gpa: std.mem.Allocator,
+            ctx: RootRef,
+            src: []const u8,
+            opts: RunOptions,
+        ) RunError!Result {
             log.debug("Starting ScriptyVM", .{});
             log.debug("State: {s}", .{@tagName(vm.state)});
             switch (vm.state) {
@@ -95,12 +111,6 @@ pub fn VM(comptime _Value: type) type {
                     }
                 },
             }
-
-            // On error make the vm usable again.
-            errdefer |err| switch (@as(RunError, err)) {
-                error.Quota => {},
-                else => vm.reset(),
-            };
 
             var quota = opts.quota;
             if (opts.diag != null) @panic("TODO: implement diagnostics");
@@ -352,10 +362,10 @@ fn call(
                 else => return no_builtins,
             };
 
-            inline for (@typeInfo(Builtins).@"struct".decls) |decl| {
-                if (decl.name[0] == '_') continue;
-                if (std.mem.eql(u8, decl.name, fn_name)) {
-                    return @field(Builtins, decl.name).call(
+            inline for (@typeInfo(Builtins).@"struct".decl_names) |decl| {
+                if (decl[0] == '_') continue;
+                if (std.mem.eql(u8, decl, fn_name)) {
+                    return @field(Builtins, decl).call(
                         v,
                         gpa,
                         root,
@@ -413,15 +423,15 @@ fn dot(
 
             if (!@hasDecl(T, "Dot") or !T.Dot) return no_fields;
 
-            inline for (info.fields) |f| {
-                if (f.name[0] == '_') continue;
-                if (std.mem.eql(u8, f.name, component)) {
-                    const by_ref = @typeInfo(f.type) == .@"struct" and
-                        @hasDecl(f.type, "PassByRef") and f.type.PassByRef;
+            inline for (info.field_names, info.field_types) |name, t| {
+                if (name[0] == '_') continue;
+                if (std.mem.eql(u8, name, component)) {
+                    const by_ref = @typeInfo(t) == .@"struct" and
+                        @hasDecl(t, "PassByRef") and t.PassByRef;
                     if (by_ref) {
-                        return ValueUnion.from(gpa, &@field(v, f.name));
+                        return ValueUnion.from(gpa, &@field(v, name));
                     } else {
-                        return ValueUnion.from(gpa, @field(v, f.name));
+                        return ValueUnion.from(gpa, @field(v, name));
                     }
                 }
             }
