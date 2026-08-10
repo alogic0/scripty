@@ -53,7 +53,7 @@ pub fn VM(comptime _Value: type) type {
         pub const RootRef = @FieldType(Value, "root");
 
         pub const Result = struct {
-            debug: if (builtin.mode == .Debug)
+            debug: if (builtin.mode == .debug)
                 enum { unset, set }
             else
                 enum { set } = .set,
@@ -61,7 +61,7 @@ pub fn VM(comptime _Value: type) type {
             loc: Tokenizer.Token.Loc,
         };
 
-        const unset = if (builtin.mode == .Debug) .unset else undefined;
+        const unset = if (builtin.mode == .debug) .unset else undefined;
 
         pub const RunOptions = struct {
             diag: ?*Diagnostics = null,
@@ -120,7 +120,7 @@ pub fn VM(comptime _Value: type) type {
                 if (quota == 1) return error.Quota;
                 if (quota > 1) quota -= 1;
             }) {
-                if (builtin.mode == .Debug) {
+                if (builtin.mode == .debug) {
                     if (vm.stack.len == 0) {
                         log.debug("Stack is empty", .{});
                     } else {
@@ -221,7 +221,7 @@ pub fn VM(comptime _Value: type) type {
                         const old_value = if (global)
                             try Value.from(gpa, ctx)
                         else blk: {
-                            if (builtin.mode == .Debug) {
+                            if (builtin.mode == .debug) {
                                 const stack_debug = slice.items(.debug);
 
                                 std.debug.assert(
@@ -245,7 +245,7 @@ pub fn VM(comptime _Value: type) type {
                         } else {
                             stack_locs[stack_locs.len - 1] = node.loc;
                             stack_values[stack_values.len - 1] = new_value;
-                            if (builtin.mode == .Debug) {
+                            if (builtin.mode == .debug) {
                                 const stack_debug = slice.items(.debug);
                                 stack_debug[stack_values.len - 1] = .set;
                             }
@@ -283,7 +283,7 @@ pub fn VM(comptime _Value: type) type {
                         // center on the old value
                         call_idx -= 1;
                         const old_value = stack_values[call_idx];
-                        if (builtin.mode == .Debug) {
+                        if (builtin.mode == .debug) {
                             const stack_debug = slice.items(.debug);
                             std.debug.assert(
                                 stack_debug[call_idx] == .set,
@@ -310,7 +310,7 @@ pub fn VM(comptime _Value: type) type {
 
                         // old value becomes the new result
                         stack_values[call_idx] = new_value;
-                        if (builtin.mode == .Debug) {
+                        if (builtin.mode == .debug) {
                             const stack_debug = slice.items(.debug);
                             stack_debug[call_idx] = .set;
                         }
